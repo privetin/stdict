@@ -1,6 +1,5 @@
 import json
 import os
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import mcp.types as types
@@ -10,6 +9,7 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("stdict")
 
 SEARCH_API_URL = "https://stdict.korean.go.kr/api/search.do"
+VIEW_API_URL = "https://stdict.korean.go.kr/api/view.do"
 
 
 def get_api_key():
@@ -91,6 +91,7 @@ def search(
         "start": start,
         "num": num,
         "advanced": "y" if advanced else "n",
+        "type_search": "search"
     }
 
     if advanced:
@@ -105,20 +106,88 @@ def search(
             "letter_s": letter_s,
             "letter_e": letter_e,
         }
-        
+
         # Only add date parameters if they're provided
         if update_s:
             advanced_params["update_s"] = update_s
         if update_e:
             advanced_params["update_e"] = update_e
-            
+
         params.update(advanced_params)
 
     try:
         response = requests.get(SEARCH_API_URL, params=params)
         response.raise_for_status()
-        
+
         # Return the original XML response as text
+        return [types.TextContent(type="text", text=response.text)]
+
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"Error: {str(e)}")]
+
+
+def determine_method(query: str) -> str:
+    """
+    Determine the appropriate method based on query format
+
+    Args:
+        query: The search term or target code
+
+    Returns:
+        The appropriate method: "target_code" for numeric IDs, "word_info" for words
+    """
+    # Check if query contains only digits
+    if query.isdigit():
+        return "target_code"
+    else:
+        return "word_info"
+
+
+@mcp.tool()
+def detail(
+    query: str,
+    api_key: str = API_KEY,
+    method: str = None,
+    req_type: str = "json",
+) -> list[types.TextContent | types.ImageContent]:
+    """
+    Get detailed information about a dictionary entry from the Korean Standard Dictionary
+
+    Args:
+        query: Search term in Korean or target_code
+        api_key: Your Standard Korean Dictionary API key
+        method: Search method, either "word_info" (표제어 정보) or "target_code". 
+                If not provided, will be automatically determined based on the query format.
+        req_type: Response format type, either "json" or "xml" (default: "json")
+
+    Returns:
+        Detailed information about the dictionary entry in its original format
+    """
+    # Auto-determine method if not specified
+    if method is None:
+        method = determine_method(query)
+
+    # Validate method parameter
+    if method not in ["word_info", "target_code"]:
+        return [types.TextContent(type="text", text="Error: Invalid method value. Must be 'word_info' or 'target_code'")]
+
+    # Validate req_type parameter
+    if req_type not in ["json", "xml"]:
+        return [types.TextContent(type="text", text="Error: Invalid req_type value. Must be 'json' or 'xml'")]
+
+    params = {
+        "key": api_key,
+        "method": method,
+        "req_type": req_type,
+        "q": query,
+        "type_search": "view"
+    }
+
+    try:
+        response = requests.get(VIEW_API_URL, params=params)
+        response.raise_for_status()
+
+        # Return the original response as text
         return [types.TextContent(type="text", text=response.text)]
 
     except Exception as e:
